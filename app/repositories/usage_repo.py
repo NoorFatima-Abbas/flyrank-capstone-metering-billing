@@ -46,3 +46,23 @@ def lock_tenant(conn, tenant_id: int):
 def get_usage(conn, tenant_id: int):
     row = conn.execute(USAGE_SQL, {"tenant_id": tenant_id}).first()
     return int(row.calls), int(row.tokens)
+
+TENANT_PLAN_SQL = text("""
+SELECT t.id, p.name AS plan, p.api_calls_limit, p.ai_tokens_limit
+FROM tenants t JOIN plans p ON p.id = t.plan_id
+WHERE t.id = :tenant_id
+""")
+
+COST_SQL = text("""
+SELECT COALESCE(sum(cost_micros), 0) AS cost
+FROM usage_events
+WHERE tenant_id = :tenant_id AND created_at >= date_trunc('month', now())
+""")
+
+
+def get_tenant_plan(conn, tenant_id: int):
+    return conn.execute(TENANT_PLAN_SQL, {"tenant_id": tenant_id}).first()
+
+
+def get_month_cost(conn, tenant_id: int) -> int:
+    return int(conn.execute(COST_SQL, {"tenant_id": tenant_id}).scalar())
