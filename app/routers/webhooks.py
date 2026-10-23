@@ -5,8 +5,8 @@ from fastapi import APIRouter, Header, HTTPException, Request
 
 from app.config import settings
 from app.db import engine
+from app.jobs import process_event
 from app.repositories import stripe_repo
-from app.services import webhook_service
 
 router = APIRouter()
 
@@ -22,8 +22,11 @@ async def stripe_webhook(request: Request, stripe_signature: str = Header(None, 
         raise HTTPException(400, "invalid signature")
 
     event = json.loads(payload)
-    with engine.begin() as conn:
-        if not stripe_repo.claim_event(conn, event["id"], event["type"]):
-            return {"status": "duplicate"}
-        webhook_service.apply(conn, event)
-    return {"status": "processed"}
+    try:
+        with engine.begin() as conn:
+            status = process_event(conn, event)
+        return {"status": status}
+    except Exception as exc:
+        with engine.begin() as conn:
+            stripe_repo.record_failure(conn, event["id"], payload.decode(), str(exc))
+        return {"status": "queued_for_retry"}

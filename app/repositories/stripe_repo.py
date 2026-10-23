@@ -32,3 +32,29 @@ def upsert_subscription(conn, tenant_id: int, subscription_id: str, status: str)
              "DO UPDATE SET status = EXCLUDED.status, tenant_id = EXCLUDED.tenant_id"),
         {"t": tenant_id, "s": subscription_id, "st": status},
     )
+
+def record_failure(conn, event_id: str, payload: str, error: str):
+    conn.execute(
+        text("INSERT INTO failed_webhooks (event_id, payload, last_error) VALUES (:i, :p, :e) "
+             "ON CONFLICT (event_id) DO UPDATE SET last_error = EXCLUDED.last_error"),
+        {"i": event_id, "p": payload, "e": error},
+    )
+
+
+def pending_failures(conn, max_attempts: int):
+    return conn.execute(
+        text("SELECT event_id, payload, attempts FROM failed_webhooks "
+             "WHERE resolved = false AND attempts < :m ORDER BY created_at"),
+        {"m": max_attempts},
+    ).fetchall()
+
+
+def mark_resolved(conn, event_id: str):
+    conn.execute(text("UPDATE failed_webhooks SET resolved = true WHERE event_id = :i"), {"i": event_id})
+
+
+def bump_attempt(conn, event_id: str, error: str):
+    conn.execute(
+        text("UPDATE failed_webhooks SET attempts = attempts + 1, last_error = :e WHERE event_id = :i"),
+        {"i": event_id, "e": error},
+    )
